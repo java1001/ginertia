@@ -2,7 +2,7 @@
 
 **Inertia.js v3 server adapter for Gin.** Build modern single-page apps with Svelte, Vue or React while keeping routing, controllers and data loading in Go: no REST API, no client-side router.
 
-📖 Documentation: [ginertia.org](https://ginertia.org)
+📖 Documentation: [DOCS.md](https://github.com/java1001/ginertia/blob/main/DOCS.md)
 
 ## Description
 
