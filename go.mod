@@ -1,4 +1,4 @@
-module github.com/hanh/ginertia
+module github.com/java1001/ginertia
 
 go 1.24.7
 
@@ -39,4 +39,3 @@ require (
 	golang.org/x/tools v0.34.0 // indirect
 	google.golang.org/protobuf v1.36.9 // indirect
 )
-

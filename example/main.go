@@ -12,7 +12,7 @@ import (
 	"os"
 
 	"github.com/gin-gonic/gin"
-	"github.com/hanh/ginertia"
+	"github.com/java1001/ginertia"
 )
 
 //go:embed views all:public

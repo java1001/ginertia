@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/hanh/ginertia"
+	"github.com/java1001/ginertia"
 )
 
 // session is a minimal signed-cookie login, enough to show auth with

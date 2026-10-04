@@ -3,7 +3,8 @@
 > Complete integration reference for **ginertia**, an Inertia.js v3 server adapter for the Gin web framework (Go).
 > Written for developers and AI coding agents. Everything here is derived from the library source; where behavior is subtle, the exact rule is stated.
 
-- Module: `github.com/hanh/ginertia` (replace with your published module path)
+- Module: `github.com/java1001/ginertia`
+- Source: https://github.com/java1001/ginertia
 - Package: `ginertia`
 - Requires: Go 1.24+, Gin 1.11+, `github.com/go-playground/validator/v10`
 - Client: `@inertiajs/svelte` 3.x (tested 3.8 with Svelte 5, Vite 8); `@inertiajs/vue3` / `@inertiajs/react` 3.x use the same server side
@@ -121,7 +122,7 @@ bootstrap/
 ## 3. Installation
 
 ```bash
-go get github.com/hanh/ginertia
+go get github.com/java1001/ginertia
 npm i -D vite @sveltejs/vite-plugin-svelte svelte @inertiajs/svelte
 ```
 
@@ -159,7 +160,7 @@ import (
 	"os"
 
 	"github.com/gin-gonic/gin"
-	"github.com/hanh/ginertia"
+	"github.com/java1001/ginertia"
 )
 
 //go:embed views all:public

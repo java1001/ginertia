@@ -17,7 +17,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/hanh/ginertia"
+	"github.com/java1001/ginertia"
 )
 
 const root = `<!doctype html><html><head>{{ vite "src/app.js" }}{{ .inertiaHead }}</head><body>{{ .inertia }}</body></html>`
