@@ -42,7 +42,7 @@ Tested with `@inertiajs/svelte` 3.8, Svelte 5, Vite 8, Gin 1.11 and Go 1.24.
 ## Installation
 
 ```bash
-go get github.com/java1001/ginertia
+go get github.com/java1001/ginertia@latest
 ```
 
 > Change the module path in `go.mod` to your own repository before publishing. If you build straight from a source archive, run `go mod tidy` once so Go fetches the checksums.
