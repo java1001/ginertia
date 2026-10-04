@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  {{ if not .inertiaHead }}<title>{{ if .title }}{{ .title }} · {{ end }}Ginertia</title>{{ end }}
+  {{ vite "frontend/app.js" }}
+  {{ .inertiaHead }}
+</head>
+<body>
+  {{ .inertia }}
+</body>
+</html>

@@ -1,0 +1,45 @@
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+*.prof
+coverage.*
+go.work
+go.work.sum
+vendor/
+
+# Benchmark binaries (go build -o benchsrv ./_bench/server)
+/benchsrv
+/_bench/server/server
+/_bench/load/load
+
+# Example app build output (also covered by example/.gitignore)
+node_modules/
+example/app
+example/public/build/
+example/public/hot
+example/bootstrap/
+
+# Python (example/e2e)
+__pycache__/
+*.pyc
+.venv/
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Editors / OS
+.idea/
+.vscode/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+
+# Keep testdata/fuzz: failing fuzz inputs are regression tests and must be committed.
