@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -39,12 +40,20 @@ type FlashStore interface {
 // Set Secret (same value on every instance). Without it a random key is
 // generated at startup: still tamper-proof, but flash data does not survive
 // a restart or reach another instance behind a load balancer.
+//
+// The signed payload carries its issue time, and cookies older than MaxAge
+// are rejected, so a captured cookie cannot be replayed (or planted in
+// another browser by a sibling subdomain) later on.
+//
+// For the strongest cookie scoping use Name: "__Host-flash" with Secure:
+// true and no Domain (the browser then refuses it from subdomains / HTTP).
 type CookieFlashStore struct {
 	Name   string // default "ginertia_flash"
 	Secret []byte
 	Path   string // default "/"
 	Domain string
-	Secure bool // auto-enabled on TLS requests
+	Secure bool          // auto-enabled on TLS requests
+	MaxAge time.Duration // lifetime of a flash cookie, default 5 minutes
 
 	keyOnce sync.Once
 	key     []byte
@@ -62,7 +71,28 @@ func (s *CookieFlashStore) secret() []byte {
 	return s.key
 }
 
-var errBadSignature = errors.New("ginertia: invalid flash cookie signature")
+var (
+	errBadSignature = errors.New("ginertia: invalid flash cookie signature")
+	errFlashExpired = errors.New("ginertia: flash cookie expired")
+)
+
+const defaultFlashMaxAge = 5 * time.Minute
+
+func (s *CookieFlashStore) maxAge() time.Duration {
+	if s.MaxAge > 0 {
+		return s.MaxAge
+	}
+	return defaultFlashMaxAge
+}
+
+// flashEnvelope is what gets signed: the data plus its issue time.
+type flashEnvelope struct {
+	D *FlashData `json:"d"`
+	T int64      `json:"t"` // unix seconds
+}
+
+// now is replaceable in tests.
+var now = time.Now
 
 func (s *CookieFlashStore) name() string {
 	if s.Name == "" {
@@ -87,11 +117,18 @@ func (s *CookieFlashStore) Read(c *gin.Context) (*FlashData, error) {
 	if err != nil {
 		return nil, err
 	}
-	var d FlashData
-	if err := json.Unmarshal(b, &d); err != nil {
+	var env flashEnvelope
+	if err := json.Unmarshal(b, &env); err != nil {
 		return nil, err
 	}
-	return &d, nil
+	age := now().Sub(time.Unix(env.T, 0))
+	if env.T == 0 || age > s.maxAge() || age < -time.Minute {
+		return nil, errFlashExpired
+	}
+	if env.D == nil {
+		return nil, nil
+	}
+	return env.D, nil
 }
 
 func (s *CookieFlashStore) Write(c *gin.Context, d *FlashData) error {
@@ -99,7 +136,7 @@ func (s *CookieFlashStore) Write(c *gin.Context, d *FlashData) error {
 		s.set(c, "", -1)
 		return nil
 	}
-	b, err := json.Marshal(d)
+	b, err := json.Marshal(flashEnvelope{D: d, T: now().Unix()})
 	if err != nil {
 		return err
 	}
@@ -108,7 +145,7 @@ func (s *CookieFlashStore) Write(c *gin.Context, d *FlashData) error {
 	if len(v) > 4000 {
 		return errors.New("ginertia: flash data too large for a cookie, use a server-side FlashStore")
 	}
-	s.set(c, v, 0)
+	s.set(c, v, int(s.maxAge()/time.Second))
 	return nil
 }
 

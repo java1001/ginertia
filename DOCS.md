@@ -182,8 +182,8 @@ func main() {
 		RootView:       "views/app.html",
 		RootFS:         files,
 		ReloadRootView: !prod,
-		Vite:           &ginertia.Vite{FS: files},
-		Flash:          &ginertia.CookieFlashStore{Secret: key},
+		Vite:           &ginertia.Vite{FS: files, DisableDev: prod},
+		Flash:          &ginertia.CookieFlashStore{Secret: key, Secure: prod},
 	})
 	inertia.Share("appName", "My App")
 
@@ -191,7 +191,7 @@ func main() {
 	build, _ := fs.Sub(files, "public/build")
 	r.StaticFS("/build", http.FS(build))
 
-	r.Use(ginertia.CSRF(ginertia.CSRFConfig{Secret: key}))
+	r.Use(ginertia.CSRF(ginertia.CSRFConfig{Secret: key, Secure: prod}))
 	r.Use(inertia.Middleware())
 
 	r.GET("/", func(c *gin.Context) {
@@ -613,6 +613,7 @@ ginertia.Share(c, "auth", gin.H{"user": currentUser})    // current request only
 func Redirect(c *gin.Context, location string)
 func Back(c *gin.Context, fallback ...string)
 func Location(c *gin.Context, target string)
+func IsLocalURL(target string) bool
 ```
 
 ### `Redirect`
@@ -637,6 +638,21 @@ Forces a full browser navigation (`window.location`). Use it for external URLs, 
 - Inertia request → `409` + `X-Inertia-Location: <target>`, aborted.
 - Normal request → `302` to target, aborted.
 - Rejected with `500` (error recorded via `c.Error`) if the URL fails to parse or its scheme is not empty/`http`/`https` (e.g. `javascript:`).
+- **The host is not restricted** (`//evil.example` and `https://evil.example` are accepted — that is the point of `Location`). Never pass user input such as `?next=` / `?redirect=` straight to `Location` or `Redirect`: that is an open redirect. Validate it first:
+
+```go
+func IsLocalURL(target string) bool
+```
+
+`IsLocalURL` is true only for paths on this site (`/dashboard`, `/a?b=c`); it rejects absolute URLs, `//host`, `/\host`, `\\host`, schemes and control characters (browsers strip tabs/newlines, turning `/\t/evil` into `//evil`).
+
+```go
+next := c.Query("next")
+if !ginertia.IsLocalURL(next) {
+	next = "/dashboard"
+}
+ginertia.Redirect(c, next)
+```
 
 ---
 
@@ -829,6 +845,7 @@ ginertia.Render(c, "Users/Index", props)
 
 ```go
 type Vite struct {
+	DisableDev   bool   // never use the dev server (ignore HotFile/DevURL) — set it in production
 	HotFile      string // default "public/hot"
 	DevURL       string // force dev mode, e.g. "http://localhost:5173"
 	BaseURL      string // public URL of the build dir, default "/build/"
@@ -843,7 +860,9 @@ func (v *Vite) Asset(path string) (string, error)
 
 ### Dev mode vs build mode
 
-Dev mode is on when `DevURL` is set **or** the hot file exists. The hot file is always read **from the working directory on disk** (`os.ReadFile`), even when `FS` is set.
+Dev mode is on when `DevURL` is set **or** the hot file exists, unless `DisableDev` is true. The hot file is always read **from the working directory on disk** (`os.ReadFile`), even when `FS` is set.
+
+> **Production: set `DisableDev: true`.** Otherwise a stale `public/hot` next to the binary (left by a SIGKILLed Vite, copied by a deploy script, or written by anyone with write access to that directory) switches every page to load its JavaScript from the URL inside that file. With `DisableDev` the manifest is always used and the hot file is never read.
 
 - **Dev:** `Tags` emits `<script type="module" src="<dev>/@vite/client">` plus one tag per entry (`<link rel="stylesheet">` for `.css`, module script otherwise). `Version()` is `""`.
 - **Build:** `Tags` reads the manifest (from `FS` if set, else disk; cached after first read) and emits, in order: all CSS `<link rel="stylesheet">` (entry CSS + CSS of imported chunks, de-duplicated), `<link rel="modulepreload">` for imported chunks, and `<script type="module">` for each entry. URLs are prefixed with `BaseURL`.
@@ -879,7 +898,7 @@ What it configures:
 - Build: `manifest: true`, output `public/build`; SSR build: no manifest, output `bootstrap/ssr`.
 - Writes the dev server URL to `public/hot` when Vite starts listening; deletes it on exit (SIGINT/SIGTERM/SIGHUP).
 
-If Vite is killed with SIGKILL, `public/hot` may remain and the Go server will keep using dev mode. Delete it manually.
+If Vite is killed with SIGKILL, `public/hot` may remain and the Go server will keep using dev mode. Delete it manually (in production `DisableDev: true` makes this harmless).
 
 ---
 
@@ -978,6 +997,18 @@ router.on('httpException', (event) => {
 
 Plain HTML forms (non-Inertia) must include the token in a `_token` field.
 
+When the header is absent, the middleware reads `_token` with `c.PostForm`, which parses the request body (multipart: up to Gin's `MaxMultipartMemory` in RAM, the rest in temp files) before the token is checked. Cross-origin browser requests are rejected earlier by the origin check, but a non-browser client can still make the server parse a large body. Put a body size limit in front of `CSRF` on routes that do not need large uploads:
+
+```go
+r.Use(func(c *gin.Context) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 1<<20) // 1 MB
+	c.Next()
+})
+r.Use(ginertia.CSRF(...))
+```
+
+`Secure` is only switched on automatically for direct TLS connections. Behind a TLS-terminating proxy (nginx, Cloudflare, a load balancer) set `Secure: true` explicitly — the same applies to `CookieFlashStore.Secure`.
+
 The token is not bound to a user session. On its own, a double-submit token can be defeated by a sibling subdomain that plants its own validly signed `XSRF-TOKEN` cookie; the origin check above closes that hole for every modern browser (all of them send `Sec-Fetch-Site`). `security_test.go` and `example/e2e/csrf.py` reproduce that attack and assert it gets 419.
 
 Excluding webhooks:
@@ -1016,11 +1047,14 @@ type CookieFlashStore struct {
 	Secret []byte // HMAC key; if empty, a random key is generated at startup
 	Path   string // default "/"
 	Domain string
-	Secure bool   // auto-on for TLS requests
+	Secure bool          // auto-on for TLS requests; set true behind a TLS proxy
+	MaxAge time.Duration // cookie lifetime, default 5 minutes
 }
 ```
 
-- Cookie value: `base64url(JSON) + "." + base64url(HMAC-SHA256)`. `HttpOnly`, `SameSite=Lax`, session cookie.
+- Cookie value: `base64url(JSON{d: data, t: issued-at}) + "." + base64url(HMAC-SHA256)`. `HttpOnly`, `SameSite=Lax`, `Max-Age` = `MaxAge`.
+- The issue time is inside the signed payload: cookies older than `MaxAge` (or dated more than a minute in the future) are rejected. A captured cookie therefore cannot be replayed later, nor planted into another browser by a sibling subdomain ("cookie tossing") outside that window. Cookies written by v0.1.x (no issue time) are rejected once after upgrading.
+- Strongest scoping: `Name: "__Host-flash", Secure: true` and no `Domain` — browsers then refuse the cookie over HTTP and from subdomains.
 - Tampered or unsigned cookies are rejected (read returns an error; the middleware ignores it).
 - Without `Secret`, data is still tamper-proof but does not survive a restart and does not work across multiple instances. **Always set `Secret` in production.**
 - Values over ~4000 bytes fail with `ginertia: flash data too large for a cookie, use a server-side FlashStore` (recorded via `c.Error`; the data is dropped). Use a server-side store for large error maps.
@@ -1357,9 +1391,9 @@ python3 example/e2e/e2e_all.py      # full feature run
 
 1. `npm run build` **before** `go build` (embedding `public/` requires the build output to exist).
 2. `go build` with `//go:embed views all:public` and `RootFS`/`Vite.FS` pointing at the embed FS. The `all:` prefix is required so `public/build/.vite/manifest.json` (a dot-directory) is embedded.
-3. Make sure no stale `public/hot` exists in the working directory of the running binary (it would force dev mode).
+3. Set `Vite.DisableDev: true` so a stale or planted `public/hot` can never switch the site to a dev server URL.
 4. Set `APP_KEY` (or your equivalent) to the same random secret on every instance; use it for `CookieFlashStore.Secret` and `CSRFConfig.Secret`.
-5. Serve over HTTPS (cookies get `Secure` automatically on TLS; behind a TLS-terminating proxy, set `Secure: true` explicitly).
+5. Serve over HTTPS (cookies get `Secure` automatically on TLS; behind a TLS-terminating proxy, set `Secure: true` explicitly on both `CSRFConfig` and `CookieFlashStore`).
 6. Deploy all instances with the same build. Mixed builds behind a load balancer produce different versions → repeated 409 full reloads.
 7. Optional SSR: run `node bootstrap/ssr/ssr.js` as a sidecar/service and set `Config.SSR`.
 8. Set `ReloadRootView: false` and `gin.SetMode(gin.ReleaseMode)`.
@@ -1380,6 +1414,8 @@ Handled by the library (regression tests in `security_test.go`):
 | Protocol-relative URL from a `//evil.example` request path | leading slashes are collapsed in the 409 `X-Inertia-Location` and in `page.url` |
 | CSRF, including from sibling subdomains (cookie tossing) | `CSRF` middleware: `Sec-Fetch-Site` / `Origin` check plus HMAC-signed double-submit token; 419 on failure |
 | Forged flash/errors | HMAC-signed cookie; random key if `Secret` unset |
+| Replayed / tossed flash cookie | signed issue time, rejected after `CookieFlashStore.MaxAge` (default 5 min) |
+| Scripts loaded from a stale/planted `public/hot` | `Vite.DisableDev` ignores the hot file and `DevURL` |
 | `javascript:` URLs in `Location` | only empty/`http`/`https` schemes allowed |
 | Internal error leakage | parser errors replaced by a generic message; resolver errors → empty 500 |
 | Clobbering `Vary` set by other middleware | `Vary` is appended |
@@ -1389,7 +1425,10 @@ Your responsibility:
 - **All props reach the browser.** Use DTOs or `json:"-"` for sensitive fields.
 - `Optional`/`Defer`/`Once` are delivery mechanisms, not authorization.
 - Authorize every handler, including those only reached via partial reloads.
-- Use a strong, shared secret; HTTPS in production.
+- Use a strong, shared secret; HTTPS in production (`Secure: true` behind a TLS proxy).
+- Never pass user input to `Location`/`Redirect` without `IsLocalURL` (or an allowlist).
+- Set `Vite.DisableDev: true` in production.
+- Limit request body size in front of `CSRF` where large uploads are not expected.
 - On logout: `ClearHistory(c)` server side and `router.flushAll()` client side.
 
 ---
@@ -1415,7 +1454,8 @@ Your responsibility:
 | No HMR in dev | Vite not running, or Go not started from the directory containing `public/hot` |
 | Production serving dev-server URLs | stale `public/hot` next to the binary; delete it |
 | Every navigation does a full reload | version mismatch: different builds across instances, or a changing `VersionFunc` |
-| Flash/errors lost after redirect | `Secret` differs across instances or is unset with multiple instances; or data > 4 KB |
+| Flash/errors lost after redirect | `Secret` differs across instances or is unset with multiple instances; data > 4 KB; or the redirect target loaded later than `CookieFlashStore.MaxAge` (server clocks out of sync?) |
+| Production page loads scripts from `localhost:5173` | stale `public/hot`; set `Vite.DisableDev: true` |
 | `419` on every POST | `CSRFConfig.Secret` differs across instances, or a non-Inertia client is not sending `X-XSRF-TOKEN`/`_token` |
 | `419` only in production behind a proxy | the proxy rewrites `Host`, so the browser's `Origin` no longer matches; preserve `Host` in the proxy or add the public origin to `CSRFConfig.TrustedOrigins` |
 | `419` from a separate frontend domain | add that origin to `CSRFConfig.TrustedOrigins` |
@@ -1489,7 +1529,7 @@ type OnceMeta struct{ Prop string; ExpiresAt *int64 }
 type ScrollMetaOut struct{ ScrollMeta; Reset bool }
 
 // Vite / SSR
-type Vite struct{ HotFile, DevURL, BaseURL, ManifestPath string; FS fs.FS }
+type Vite struct{ DisableDev bool; HotFile, DevURL, BaseURL, ManifestPath string; FS fs.FS }
 func (*Vite) IsDev() bool
 func (*Vite) Tags(entries ...string) (template.HTML, error)
 func (*Vite) Asset(path string) (string, error)
@@ -1501,7 +1541,7 @@ type FlashStore interface {
 	Read(c *gin.Context) (*FlashData, error)
 	Write(c *gin.Context, data *FlashData) error
 }
-type CookieFlashStore struct{ Name string; Secret []byte; Path, Domain string; Secure bool }
+type CookieFlashStore struct{ Name string; Secret []byte; Path, Domain string; Secure bool; MaxAge time.Duration }
 
 // CSRF
 type CSRFConfig struct{ … }                   // §16
@@ -1529,3 +1569,5 @@ Use this list when adding ginertia to an existing Gin app (or when an AI agent s
 - [ ] Map DB models to DTOs before passing them as props.
 - [ ] Logout: `ClearHistory(c)` + client `router.flushAll()` on `clearHistory`.
 - [ ] Production: build assets before `go build`, embed `all:public`, shared secret, HTTPS, same build on every instance.
+- [ ] Production: `Vite{DisableDev: true}`, `Secure: true` on `CSRFConfig` + `CookieFlashStore` behind a TLS proxy, body size limit before `CSRF`.
+- [ ] Redirects to user-supplied URLs go through `IsLocalURL`.

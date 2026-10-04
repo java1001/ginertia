@@ -58,11 +58,13 @@ Copy `example/vite-plugin-ginertia.js` into your project. It works like `laravel
 ## Setup
 
 ```go
+prod := os.Getenv("APP_ENV") == "production"
+
 inertia := ginertia.MustNew(ginertia.Config{
     RootView: "views/app.html",
     RootFS:   files,                    // os.DirFS(".") in dev, embed.FS in production
-    Vite:     &ginertia.Vite{FS: files},
-    Flash:    &ginertia.CookieFlashStore{Secret: []byte(os.Getenv("APP_KEY"))},
+    Vite:     &ginertia.Vite{FS: files, DisableDev: prod}, // prod: never read public/hot
+    Flash:    &ginertia.CookieFlashStore{Secret: []byte(os.Getenv("APP_KEY")), Secure: prod},
 })
 inertia.Share("appName", "My App")      // shared with every page
 
@@ -205,7 +207,10 @@ The following issues were checked with real attacks and are covered by regressio
 | Protocol-relative redirect via a `//evil.com` request path | Leading slashes are collapsed in the 409 `X-Inertia-Location` and in `page.url`. |
 | CSRF | `ginertia.CSRF` middleware: `Sec-Fetch-Site` / `Origin` check plus an HMAC-signed double-submit token that the Inertia client sends automatically. Failures get 419. |
 | CSRF from a sibling subdomain (cookie tossing a valid signed token) | Rejected by the origin check (`same-site` requests are not trusted). Reproduced in a real browser by `example/e2e/csrf.py`. Allow extra origins explicitly with `CSRFConfig.TrustedOrigins`. |
-| Forged flash cookies | Always HMAC-signed. Without `Secret`, a random key is generated at startup. Secure is enabled automatically over TLS. |
+| Forged flash cookies | Always HMAC-signed. Without `Secret`, a random key is generated at startup. Secure is enabled automatically over TLS (set `Secure: true` behind a TLS proxy). |
+| Replayed / tossed flash cookies | The issue time is signed into the cookie; it is rejected after `CookieFlashStore.MaxAge` (default 5 minutes). |
+| Scripts loaded from a stale or planted `public/hot` | `Vite{DisableDev: true}` (production) never reads the hot file. |
+| Open redirect via user input (`?next=`) | `Location` is for external URLs and does not restrict the host; check user input with `ginertia.IsLocalURL` first. |
 | `Location("javascript:...")` | Only http(s) and relative URLs are allowed. |
 | Leaking internal errors | `ValidationErrors` never exposes parser error messages. A failing resolver returns 500 with an empty body. |
 | Overwriting other middleware's `Vary` header | Values are appended, not replaced. |
@@ -217,6 +222,7 @@ The following issues were checked with real attacks and are covered by regressio
 - Use the same `APP_KEY` on every instance (flash and CSRF), and serve production over HTTPS.
 - Behind a reverse proxy, keep the original `Host` header (or list your public origin in `CSRFConfig.TrustedOrigins`), otherwise the CSRF origin check returns 419.
 - On logout, call `ginertia.ClearHistory(c)` and add `router.flushAll()` on the client (see the prefetch section above).
+- In production set `Vite{DisableDev: true}`, and put a request body size limit in front of `ginertia.CSRF` on routes that do not take large uploads.
 
 ## Performance & memory
 

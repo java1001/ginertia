@@ -33,7 +33,7 @@ func main() {
 		RootView:       "views/app.html",
 		RootFS:         files,
 		ReloadRootView: !prod,
-		Vite:           &ginertia.Vite{FS: files},
+		Vite:           &ginertia.Vite{FS: files, DisableDev: prod},
 		Flash:          &ginertia.CookieFlashStore{Secret: []byte(env("APP_KEY", "dev-secret-change-me"))},
 	}
 	if os.Getenv("SSR") == "1" {

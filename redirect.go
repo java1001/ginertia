@@ -48,6 +48,10 @@ func Back(c *gin.Context, fallback ...string) {
 // URLs or non-Inertia pages (OAuth, file downloads, another app).
 // Only http(s) and relative URLs are allowed: the client assigns this to
 // window.location, so a "javascript:" URL would be XSS.
+//
+// Location does NOT restrict the host ("//evil.example" is accepted, it is
+// meant for external URLs). Never pass user input (?next=, ?redirect=)
+// straight to it — check it with IsLocalURL first or keep an allowlist.
 func Location(c *gin.Context, target string) {
 	if u, err := url.Parse(strings.TrimSpace(target)); err != nil ||
 		(u.Scheme != "" && u.Scheme != "http" && u.Scheme != "https") {
@@ -62,4 +66,18 @@ func Location(c *gin.Context, target string) {
 	}
 	c.Redirect(http.StatusFound, target)
 	c.Abort()
+}
+
+// IsLocalURL reports whether target is a path on this site ("/dashboard",
+// "/a?b=c") and not an absolute or protocol-relative URL ("https://x",
+// "//x", "/\x"). Use it before redirecting to user-supplied URLs.
+func IsLocalURL(target string) bool {
+	if target == "" || target[0] != '/' {
+		return false
+	}
+	if len(target) > 1 && (target[1] == '/' || target[1] == '\\') {
+		return false
+	}
+	u, err := url.Parse(target)
+	return err == nil && u.Scheme == "" && u.Host == ""
 }

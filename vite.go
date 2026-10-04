@@ -14,8 +14,15 @@ import (
 // development, the built manifest in production.
 //
 // Dev mode is on when HotFile exists (the bundled vite plugin writes the dev
-// server URL into it while `vite` runs) or when DevURL is set.
+// server URL into it while `vite` runs) or when DevURL is set — unless
+// DisableDev is true. Set DisableDev in production: otherwise a stale or
+// planted hot file in the working directory makes every page load its
+// scripts from the URL written in that file.
 type Vite struct {
+	// DisableDev never uses the dev server: HotFile and DevURL are ignored
+	// and the manifest is always used. Recommended: DisableDev: isProduction.
+	DisableDev bool
+
 	HotFile      string // default "public/hot"
 	DevURL       string // force dev mode, e.g. "http://localhost:5173"
 	BaseURL      string // public URL of the build dir, default "/build/"
@@ -53,6 +60,9 @@ func (v *Vite) base() string {
 }
 
 func (v *Vite) devURL() string {
+	if v.DisableDev {
+		return ""
+	}
 	if v.DevURL != "" {
 		return strings.TrimRight(v.DevURL, "/")
 	}
